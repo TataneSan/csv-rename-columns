@@ -1,143 +1,167 @@
-"""csv-rename-columns - rename CSV columns in bulk.
+#!/usr/bin/env python3
+"""csv-rename-columns: rename CSV columns via OLD=NEW pairs or a regex.
 
-Renames are provided as a JSON map file ({"old": "new", ...}) or as
-OLD=NEW pairs on the command line. An alternative pattern mode applies a
-regex substitution to every column name.
+Renames columns of a CSV file given an explicit mapping (``old=new``
+arguments or a mapping file with one pair per line) or a regex applied to
+every header name with capture-group backreferences. Unmapped columns keep
+their original name.
 
 Exit codes:
-  0  success
-  1  error (io, unknown column, bad map)
-  2  --check mode: no rename rule matched anything
+    0  Success.
+    1  I/O or CLI error.
+    2  --check mode and no column was renamed at all.
 """
-
-from __future__ import annotations
 
 import argparse
 import csv
+import io
 import json
 import re
 import sys
 
-__version__ = "1.0.0"
 
-
-def _read(path):
-    if path in ("-", None):
-        data = sys.stdin.read()
-    else:
-        with open(path, newline="", encoding="utf-8") as fh:
-            data = fh.read()
+def read_rows(path):
     try:
-        dialect = csv.Sniffer().sniff(data[:8192], delimiters=";,\t|")
-    except csv.Error:
-        dialect = csv.excel
-    rows = list(csv.reader(data.splitlines(), dialect))
-    if not rows:
-        raise ValueError("empty input")
-    return rows, dialect
+        if path == "-":
+            text = sys.stdin.read()
+        else:
+            with open(path, "r", encoding="utf-8", newline="") as fh:
+                text = fh.read()
+    except OSError as exc:
+        print("error: cannot read %s: %s" % (path, exc), file=sys.stderr)
+        sys.exit(1)
+    return list(csv.reader(io.StringIO(text)))
 
 
-def load_renames(args):
-    pairs = {}
-    if args.map_file:
-        with open(args.map_file, encoding="utf-8") as fh:
-            obj = json.load(fh)
-        if not isinstance(obj, dict):
-            raise ValueError("map file must contain a JSON object")
-        pairs.update({str(k): str(v) for k, v in obj.items()})
-    for spec in args.pairs or []:
-        if "=" not in spec:
-            raise ValueError("rename spec must be OLD=NEW: %s" % spec)
-        old, new = spec.split("=", 1)
-        pairs[old] = new
-    return pairs
+def parse_pair(pair, source):
+    if "=" not in pair:
+        print("error: %s: expected OLD=NEW, got %r" % (source, pair),
+              file=sys.stderr)
+        sys.exit(1)
+    old, new = pair.split("=", 1)
+    return old.strip(), new.strip()
 
 
 def main(argv=None):
-    p = argparse.ArgumentParser(prog="csv-rename-columns",
-                                description="Bulk-rename CSV columns (map file, OLD=NEW pairs, or regex pattern).")
-    p.add_argument("input", help="csv file (- / omitted for stdin)")
-    p.add_argument("pairs", nargs="*", help="OLD=NEW rename pairs")
-    p.add_argument("-m", "--map-file", help="JSON file {old_name: new_name}")
-    p.add_argument("--pattern", help="regex applied to each column name")
-    p.add_argument("--replace", default=r"\g<0>", help="replacement for --pattern (default: keep match)")
-    p.add_argument("--lower", action="store_true", help="lowercase all column names")
-    p.add_argument("--snake", action="store_true", help="convert column names to snake_case")
-    p.add_argument("--check", action="store_true", help="exit 2 if nothing would be renamed")
-    p.add_argument("--dry-run", action="store_true", help="show renames, do not output csv")
-    p.add_argument("-q", "--quiet", action="store_true")
-    p.add_argument("--json", action="store_true", help="JSON report of renames on stderr")
-    p.add_argument("-o", "--output", help="output file (default stdout)")
-    p.add_argument("-V", "--version", action="version", version="csv-rename-columns " + __version__)
-    args = p.parse_args(argv)
+    parser = argparse.ArgumentParser(
+        prog="csv-rename-columns",
+        description="Rename CSV columns via OLD=NEW pairs or a regex.",
+    )
+    parser.add_argument(
+        "file", nargs="?", default="-",
+        help="input CSV file (default: stdin; '-' = stdin)",
+    )
+    parser.add_argument(
+        "-m", "--map", nargs="*", default=[], metavar="OLD=NEW",
+        help="explicit column rename pairs (may be repeated)",
+    )
+    parser.add_argument(
+        "--map-file",
+        help="file with one OLD=NEW pair per line ('#' comments allowed)",
+    )
+    parser.add_argument(
+        "--regex", metavar="PATTERN=REPL",
+        help="rename every header matching PATTERN using REPL "
+        "(separated by '='; \\1 ... for capture groups)",
+    )
+    parser.add_argument(
+        "--json", action="store_true", dest="as_json",
+        help="emit a JSON report instead of the renamed CSV",
+    )
+    parser.add_argument(
+        "--check", action="store_true",
+        help="CI mode: exit 2 if no column was renamed",
+    )
+    parser.add_argument(
+        "-q", "--quiet", action="store_true",
+        help="suppress CSV output (useful with --check)",
+    )
+    args = parser.parse_args(argv)
 
-    try:
-        rows, dialect = _read(args.input)
-        header = rows[0]
-        pairs = load_renames(args)
-
-        rx = re.compile(args.pattern) if args.pattern else None
-
-        def transform(name):
-            original = name
-            if name in pairs:
-                name = pairs[name]
-            elif rx:
-                name = rx.sub(args.replace, name)
-                args._touched = True
-            if args.lower:
-                name = name.lower()
-            if args.snake:
-                name = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", name.strip())
-                name = re.sub(r"[^0-9A-Za-z]+", "_", name)
-                name = re.sub(r"_+", "_", name).strip("_").lower()
-            return name, name != original
-
-        new_header = []
-        changed = []
-        for i, col in enumerate(header):
-            nn, did = transform(col)
-            new_header.append(nn)
-            if did:
-                changed.append({"index": i, "old": col, "new": nn})
-
-        known = []
-        for old in pairs:
-            if old not in header:
-                known.append(old)
-        if known:
-            raise ValueError("column(s) not in header: %s" % ", ".join(known))
-
-        if args.json:
-            print(json.dumps({"renamed": changed, "count": len(changed)}, ensure_ascii=False), file=sys.stderr)
-
-        if args.check:
-            if not changed:
-                if not args.quiet:
-                    print("nothing to rename", file=sys.stderr)
-                return 2
-            return 0
-
-        if args.dry_run:
-            for c in changed:
-                print("%s -> %s" % (c["old"], c["new"]))
-            if not changed and not args.quiet:
-                print("no renames")
-            return 0
-
-        out_fh = sys.stdout if args.output in ("-", None) else open(args.output, "w", newline="", encoding="utf-8")
+    mapping = {}
+    for pair in args.map:
+        old, new = parse_pair(pair, "--map")
+        mapping[old] = new
+    if args.map_file:
         try:
-            w = csv.writer(out_fh, dialect=dialect, lineterminator="\n")
-            w.writerow(new_header)
-            for r in rows[1:]:
-                w.writerow(r)
-        finally:
-            if out_fh is not sys.stdout:
-                out_fh.close()
-        return 0
-    except (ValueError, OSError, csv.Error, json.JSONDecodeError, re.error) as e:
-        print("error: %s" % e, file=sys.stderr)
+            with open(args.map_file, "r", encoding="utf-8") as fh:
+                for lineno, line in enumerate(fh, 1):
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    old, new = parse_pair(line, "%s:%d" % (args.map_file, lineno))
+                    mapping[old] = new
+        except OSError as exc:
+            print("error: cannot read %s: %s" % (args.map_file, exc),
+                  file=sys.stderr)
+            return 1
+
+    rx = None
+    rx_repl = None
+    if args.regex:
+        if "=" not in args.regex:
+            print("error: --regex expects PATTERN=REPL", file=sys.stderr)
+            return 1
+        pattern, rx_repl = args.regex.split("=", 1)
+        try:
+            rx = re.compile(pattern)
+        except re.error as exc:
+            print("error: invalid --regex pattern: %s" % exc, file=sys.stderr)
+            return 1
+
+    rows = read_rows(args.file)
+    if not rows:
+        print("error: empty input", file=sys.stderr)
         return 1
+    header = rows[0]
+
+    renamed = 0
+    renames = {}
+    new_header = []
+    for name in header:
+        if name in mapping:
+            new_header.append(mapping[name])
+            renames[name] = mapping[name]
+            renamed += 1
+        elif rx is not None and rx.search(name):
+            try:
+                new_name = rx.sub(rx_repl, name)
+            except re.error as exc:
+                print("error: invalid --regex replacement: %s" % exc,
+                      file=sys.stderr)
+                return 1
+            if new_name != name:
+                renames[name] = new_name
+                renamed += 1
+            new_header.append(new_name)
+        else:
+            new_header.append(name)
+
+    dupes = sorted({n for n in new_header if new_header.count(n) > 1})
+    if dupes:
+        print("error: renaming would create duplicate columns: %s"
+              % ", ".join(dupes), file=sys.stderr)
+        return 1
+
+    rows[0] = new_header
+    out = io.StringIO()
+    writer = csv.writer(out, lineterminator="\n")
+    writer.writerows(rows)
+
+    if args.as_json:
+        print(json.dumps({
+            "columns": len(header),
+            "renamed": renamed,
+            "renames": renames,
+            "header": new_header,
+        }, indent=2, ensure_ascii=False))
+    elif not args.quiet:
+        sys.stdout.write(out.getvalue())
+
+    if args.check and renamed == 0:
+        print("check failed: no column was renamed", file=sys.stderr)
+        return 2
+    return 0
 
 
 if __name__ == "__main__":

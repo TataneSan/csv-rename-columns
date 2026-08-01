@@ -1,20 +1,17 @@
 # csv-rename-columns
 
-Bulk-rename CSV columns: JSON map, OLD=NEW pairs, regex pattern, --lower/--snake normalizers.
+Rename CSV columns via OLD=NEW pairs or a regex with capture groups.
 
-Part of a collection of small zero-dependency CLI utilities for file, text and data processing.
+Zero dependencies. Pure Python 3.9+.
 
 ## Features
 
-- Renames via JSON map file and/or inline `OLD=NEW` pairs
-- `--pattern/--replace` regex renaming applied to every column
-- Normalizers: `--lower`, `--snake` (snake_case)
-- `--dry-run`, `--check` (exit 2 when nothing matches), `--json` report
-- Auto delimiter detection, stdin/stdout
+- Explicit OLD=NEW pairs via --map or a mapping file
+- --regex PATTERN=REPL renames every matching header with capture groups
+- Refuses renames that would create duplicate columns
+- --json report; --check CI mode fails when no column was renamed
 
 ## Install
-
-Requires Python >= 3.9, standard library only.
 
 ```bash
 pip install .
@@ -25,26 +22,38 @@ pip install git+https://github.com/TataneSan/csv-rename-columns.git
 ## Usage
 
 ```
-csv-rename-columns FILE [OLD=NEW ...] [-m map.json] [--pattern RE --replace R] [--lower] [--snake]
+csv-rename-columns --help
 ```
 
-### Examples
+Reads from stdin when no file is given (or when the file is `-`).
+
+### Rename two columns explicitly
 
 ```bash
-csv-rename-columns users.csv 'First Name=first_name' 'Last Name=last_name'
-csv-rename-columns data.csv --pattern '^col_' --replace ''
-cat data.csv | csv-rename-columns - --snake --lower
-csv-rename-columns data.csv -m renames.json --dry-run
+csv-rename-columns -m first_name=given last_name=family users.csv
 ```
+
+### Rename with a regex
+
+```bash
+csv-rename-columns --regex '_(name|addr)$=-\1' contacts.csv
+```
+
+### CI: fail when nothing matches
+
+```bash
+csv-rename-columns -m old=new --check -q data.csv
+```
+
 
 ## Exit codes
 
 | Code | Meaning |
-|-----:|---------|
-| 0 | success |
-| 1 | error (io, unknown column, bad map) |
-| 2 | --check: no rename matched |
+|------|---------|
+| 0    | Success |
+| 1    | I/O or CLI error |
+| 2    | --check condition not satisfied |
 
 ## License
 
-MIT — Copyright (c) 2026 TataneSan
+MIT
