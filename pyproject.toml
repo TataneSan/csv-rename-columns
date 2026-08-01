@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "csv-rename-columns"
+version = "1.0.0"
+description = "Bulk-rename CSV columns: JSON map, OLD=NEW pairs, regex pattern, --lower/--snake normalizers."
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [{name = "TataneSan"}]
+
+[project.scripts]
+csv-rename-columns = "csv_rename_columns.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["csv_rename_columns*"]
