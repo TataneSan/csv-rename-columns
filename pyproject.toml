@@ -1,18 +1,17 @@
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "csv-rename-columns"
 version = "1.0.0"
-description = "Rename CSV columns via OLD=NEW pairs or a regex with capture groups."
+description = "Rename CSV columns from a mapping"
 readme = "README.md"
 requires-python = ">=3.9"
-license = { text = "MIT" }
-authors = [{ name = "TataneSan" }]
-keywords = ["csv", "columns", "rename", "regex", "cli"]
+license = {text = "MIT"}
+authors = [{name = "TataneSan"}]
+keywords = ["cli", "text", "utility"]
 classifiers = [
-    "Development Status :: 5 - Production/Stable",
     "Environment :: Console",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
@@ -20,11 +19,8 @@ classifiers = [
     "Topic :: Utilities",
 ]
 
-[project.urls]
-Homepage = "https://github.com/TataneSan/csv-rename-columns"
-
 [project.scripts]
 csv-rename-columns = "csv_rename_columns.cli:main"
 
-[tool.setuptools]
-packages = ["csv_rename_columns"]
+[tool.setuptools.packages.find]
+include = ["csv_rename_columns*"]

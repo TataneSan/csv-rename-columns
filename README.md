@@ -1,58 +1,48 @@
 # csv-rename-columns
 
-Rename CSV columns via OLD=NEW pairs or a regex with capture groups.
-
-Zero dependencies. Pure Python 3.9+.
+Rename CSV columns from a mapping. Pure Python, zero dependencies.
 
 ## Features
 
-- Explicit OLD=NEW pairs via --map or a mapping file
-- --regex PATTERN=REPL renames every matching header with capture groups
-- Refuses renames that would create duplicate columns
-- --json report; --check CI mode fails when no column was renamed
+- `--map old=new,...` renames header columns; unmapped columns pass through
+- `--drop-unmapped` removes columns not present in the mapping (with data)
+- Unknown mapped names warn on stderr; `--require-mapped` turns them into
+  a hard failure (exit 2)
+- Duplicate column names after renaming are rejected (exit 2)
+- Custom `--delimiter`, `-o FILE` output
+- `--json` report of what was renamed/kept/dropped
+- Reads stdin when no file is given (or file is `-`)
 
 ## Install
 
 ```bash
 pip install .
-# or directly from GitHub:
+# or
 pip install git+https://github.com/TataneSan/csv-rename-columns.git
 ```
 
 ## Usage
 
-```
-csv-rename-columns --help
-```
-
-Reads from stdin when no file is given (or when the file is `-`).
-
-### Rename two columns explicitly
-
 ```bash
-csv-rename-columns -m first_name=given last_name=family users.csv
+# Rename two columns
+csv-rename-columns users.csv --map 'first_name=first,last_name=last'
+
+# Keep only the mapped columns
+csv-rename-columns users.csv --map 'id=user_id' --drop-unmapped
+
+# Strict CI: every mapped old name must exist
+csv-rename-columns users.csv --map 'id=user_id,email=mail' --require-mapped
+
+# From stdin
+cat users.csv | csv-rename-columns --map 'email=mail'
 ```
-
-### Rename with a regex
-
-```bash
-csv-rename-columns --regex '_(name|addr)$=-\1' contacts.csv
-```
-
-### CI: fail when nothing matches
-
-```bash
-csv-rename-columns -m old=new --check -q data.csv
-```
-
 
 ## Exit codes
 
-| Code | Meaning |
-|------|---------|
-| 0    | Success |
-| 1    | I/O or CLI error |
-| 2    | --check condition not satisfied |
+- `0` success
+- `1` I/O or CLI error
+- `2` validation failed (unknown column with `--require-mapped`, or
+  duplicate names after renaming)
 
 ## License
 
